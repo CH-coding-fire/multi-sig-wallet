@@ -2,17 +2,19 @@
 pragma solidity ^0.8.18;
 
 contract MultiSigWallet {
-    error NoAddress();
-    error NotOwner();
-    error NoTxIndex();
-    error NotEnoughOwnerApproval();
-    error txFail();
-    error alreadyExecuted();
-    error ownerNotInApprovalList();
+    error MultiSigWallet__NoAddress();
+    error MultiSigWallet__NotOwner();
+    error MultiSigWallet__NoTxIndex();
+    error MultiSigWallet__NotEnoughApproval();
+    error MultiSigWallet__TxFail();
+    error MultiSigWallet__AlreadyExecuted();
+    error MultiSigWallet__OwnerNotInApprovalList();
+    error MultiSigWallet__OwnerAlreadyApproved();
     address[] private s_owners;
     uint256 private s_minApproval;
     struct TxDetails {
         address s_targetAddress;
+        uint256 s_ethSendAmount;
         address[] s_approvedOwners;
         bool isExist;
         bool isExecuted;
@@ -23,41 +25,49 @@ contract MultiSigWallet {
 
     constructor(address[] memory ownerAddresses, uint minApproval){
         if(ownerAddresses.length == 0){
-            revert NoAddress();
+            revert MultiSigWallet__NoAddress();
         }
         s_owners = ownerAddresses;
         s_minApproval = minApproval;
         s_latestTxIndex = 0;
-        
     }
 
-    function requestTx(address targetAddress) external isOwner returns(uint256){
+    function requestTx(address targetAddress, uint256 ethSendAmount) external isOwner returns(uint256){
         s_latestTxIndex++;
         s_txRecords[s_latestTxIndex].s_targetAddress = targetAddress;
         s_txRecords[s_latestTxIndex].s_approvedOwners.push(msg.sender);
         s_txRecords[s_latestTxIndex].isExist = true;
+        s_txRecords[s_latestTxIndex].s_ethSendAmount = ethSendAmount;
         return s_latestTxIndex;
     }
 
     function approveTx(uint256 txIndex) external isOwner isTxIndexExists(txIndex) {
-        s_txRecords[s_latestTxIndex].s_approvedOwners.push(msg.sender);
+        for(uint256 i = 0; i < s_txRecords[txIndex].s_approvedOwners.length; i++){
+            if(s_txRecords[txIndex].s_approvedOwners[i]== msg.sender){
+                revert MultiSigWallet__OwnerAlreadyApproved();
+            }
+        }
+        
+        s_txRecords[txIndex].s_approvedOwners.push(msg.sender);
     }
 
     function executeTx(uint256 txIndex) external isOwner isTxIndexExists(txIndex){
         if(s_txRecords[txIndex].isExecuted){
-            revert alreadyExecuted();
+            revert MultiSigWallet__AlreadyExecuted();
         }
-        s_txRecords[txIndex].s_approvedOwners.length >= s_minApproval;
-        (bool success,) = s_txRecords[txIndex].s_targetAddress.call{value: address(this).balance}("");
+        if(s_txRecords[txIndex].s_approvedOwners.length < s_minApproval){
+            revert MultiSigWallet__NotEnoughApproval();
+        }
+        (bool success,) = s_txRecords[txIndex].s_targetAddress.call{value: s_txRecords[txIndex].s_ethSendAmount}("");
         if(!success){
-            revert txFail();
+            revert MultiSigWallet__TxFail();
         }
         s_txRecords[txIndex].isExecuted = true;
     }
 
     function revokeApproval(uint256 txIndex) external isOwner isTxIndexExists(txIndex) {
     if(!checkOwnerIsInApprovedOwner(s_txRecords[txIndex].s_approvedOwners, msg.sender)) {
-        revert ownerNotInApprovalList();
+        revert MultiSigWallet__OwnerNotInApprovalList();
     }
 
     // Directly modify the storage array
@@ -80,7 +90,7 @@ contract MultiSigWallet {
     approvedOwners.pop();
     }
 
-    function checkOwnerIsInApprovedOwner(address[] memory approvedOwners, address msgOwner) private returns(bool){
+    function checkOwnerIsInApprovedOwner(address[] memory approvedOwners, address msgOwner) private pure returns(bool){
         for(uint256 i = 0; i<approvedOwners.length; i++){
              if(approvedOwners[i] == msgOwner){
                 return true;
@@ -89,9 +99,29 @@ contract MultiSigWallet {
         return false;
     }
 
+    function getLatestTxIndex() external view returns(uint256){
+        return s_latestTxIndex;
+    }
+
+    function getMinApproval() external view returns(uint256){
+        return s_minApproval;
+    }
+
+    function getIsExistByTxIndex(uint256 txIndex) external view returns(bool){
+        return s_txRecords[txIndex].isExist;
+    }
+
+    function getApprovedOwnersByTxIndex(uint256 txIndex) external view returns(address[] memory){
+        return s_txRecords[txIndex].s_approvedOwners;
+    }
+
+    function getTargetAddressByTxIndex(uint256 txIndex) external view returns(address){
+        return s_txRecords[txIndex].s_targetAddress;
+    }
+
     modifier isTxIndexExists(uint256 txIndex){
         if(!s_txRecords[txIndex].isExist){
-            revert NoTxIndex();
+            revert MultiSigWallet__NoTxIndex();
         }
          _;
     }
@@ -104,10 +134,12 @@ contract MultiSigWallet {
             }
         }
         if(!isOwnerExisted){
-            revert NotOwner();
+            revert MultiSigWallet__NotOwner();
         }
         _;
     }
+
+
      
 
 
